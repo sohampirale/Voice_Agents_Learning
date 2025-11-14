@@ -1,11 +1,13 @@
 "use client";
 
 import React, { useEffect, useRef, useState } from "react";
+import { Scribe, AudioFormat, RealtimeEvents, CommitStrategy } from "@elevenlabs/client";
+import axios from "axios"
 
 export default function Home(): JSX.Element {
 	const wsUrl: string = "wss://animated-space-yodel-4jqw94q5479g2j46j-3001.app.github.dev/";
 	const wsRef = useRef<WebSocket | null>(null);
-	const [stream,setStream]=useState(null)
+	const [stream, setStream] = useState(null)
 	const [status, setStatus] = useState<"idle" | "connecting" | "open" | "closed" | "error">("idle");
 	const [messages, setMessages] = useState<string[]>([]);
 	const [input, setInput] = useState<string>("");
@@ -15,6 +17,72 @@ export default function Home(): JSX.Element {
 	const audioChunksRef = useRef<Blob[]>([]);
 	const [isRecording, setIsRecording] = useState<boolean>(false);
 	const [lastAudioUrl, setLastAudioUrl] = useState<string | null>(null);
+	const [connection, setConnection] = useState(null)
+	const [token, setToken] = useState(null)
+
+	useEffect(() => {
+		setupELabs()
+	}, [])
+
+	async function setupELabs() {
+		try {
+			const { data: response } = await axios.get('https://animated-space-yodel-4jqw94q5479g2j46j-3002.app.github.dev/temp-token-elevenlabs')
+			const token = response.token
+			console.log('Token received from BE : ', token)
+			setToken(token)
+			const connection = Scribe.connect({
+				token,
+				modelId: "scribe_v2_realtime",
+				commitStrategy:  CommitStrategy.VAD	,
+
+				vadSilenceThresholdSecs: 0.7, //bolun samplay!
+
+				vadThreshold: 0.6,
+				minSpeechDurationMs: 300,  //
+				minSilenceDurationMs: 500, //ha silence khrach silenece ahe ka jr silence <300ms sapadla voice madhe tr to gap ahe bolun zala nhi ahe
+				languageCode: 'en',
+
+			});
+
+			console.log('WS connection successfully with Eleven Labs')
+
+			connection.on(RealtimeEvents.SESSION_STARTED, () => {
+				console.log("Session started");
+			});
+
+			connection.on(RealtimeEvents.COMMITTED_TRANSCRIPT, (data) => {
+				console.log("Committed:", data.text);
+			});
+
+			connection.on(RealtimeEvents.ERROR, (error) => {
+				console.error("Error:", error);
+			});
+
+			connection.on(RealtimeEvents.AUTH_ERROR, (data) => {
+				console.error("Auth error:", data.error);
+			});
+			// Connection opened
+			connection.on(RealtimeEvents.OPEN, () => {
+				console.log("Connection opened");
+			});
+
+			// Connection closed
+			connection.on(RealtimeEvents.CLOSE, () => {
+				console.log("Connection closed");
+			});
+
+			// Partial transcripts (interim results), use this in your UI to show the live transcript
+			connection.on(RealtimeEvents.PARTIAL_TRANSCRIPT, (data) => {
+				console.log("Partial:", data.text);
+			});
+
+			setConnection(connection)
+		} catch (e) {
+			console.log('ERROR :: setupELabs : ', e)
+		}
+	}
+
+	// Authentication errors
 
 	const connect = (): void => {
 		if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
@@ -40,59 +108,80 @@ export default function Home(): JSX.Element {
 	};
 
 	async function onDataAvailaible(ev: BlobEvent) {
-			console.log('we can send this chunk ',ev.data);
-			
-			if (ev.data && ev.data.size > 0) {
-				const ab = await ev.data.arrayBuffer();
-				// const audioBlob = new Blob([ev.data], { type: "audio/wav" });
+		// alert('Inside ')
+		console.log('we can send this chunk ', ev.data);
 
-				if(wsRef.current){
 
-					console.log('5 seconds binary is sent!');
-					wsRef.current.send(ab); // sends binary
-					const userStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-					if(mediaRecorderRef.current){
-						mediaRecorderRef.current.ondataavailable=null
-						mediaRecorderRef.current.onstop=null
-						console.log('callbacks removed');
-					}
-					
-					const newMr = new MediaRecorder(userStream!,{})
-					newMr.ondataavailable=onDataAvailaible
-					newMr.onstop=onStop
-					newMr.start(5000)
-					mediaRecorderRef.current=newMr
-					// alert('mediaRecorderRef updated')
-					// wsRef.current.send(audioBlob); // sends binary
+		// if (ev.data && ev.data.size > 0) {
+		// 	const arrayBuffer = await ev.data.arrayBuffer();
+		// 	const base64Audio = Buffer.from(arrayBuffer).toString('base64');
+		// 	if (connection) {
+		// 		console.log('Audio sent to the eleven labs')
+		// 		connection.send({
+		// 			audio_base_64: base64Audio,
+		// 			sample_rate: 16000,   // ← REQUIRED!
+		// 		});
+		// 	}
 
-				}
-				audioChunksRef.current.push(ev.data);
+		// 	// const ab = await ev.data.arrayBuffer();
+		// 	// connection.send(ab)
+		// 	// const audioBlob = new Blob([ev.data], { type: "audio/wav" });
+
+		// 	if (wsRef.current) {
+
+		// 		console.log('5 seconds binary is sent!');
+		// 		// wsRef.current.send(ab); // sends binary
+		// 		const userStream = await navigator.mediaDevices.getUserMedia({
+		// 			audio: {
+		// 				sampleRate: 16000,
+		// 				channelCount: 1,
+		// 				echoCancellation: true,
+		// 				noiseSuppression: true,
+		// 			}
+		// 		});
+
+		// 		if (mediaRecorderRef.current) {
+		// 			mediaRecorderRef.current.ondataavailable = null
+		// 			mediaRecorderRef.current.onstop = null
+		// 			console.log('callbacks removed');
+		// 		}
+
+		// 		const newMr = new MediaRecorder(userStream!, {})
+		// 		newMr.ondataavailable = onDataAvailaible
+		// 		newMr.onstop = onStop
+		// 		newMr.start(500)
+		// 		mediaRecorderRef.current = newMr
+		// 		// alert('mediaRecorderRef updated')
+		// 		// wsRef.current.send(audioBlob); // sends binary
+
+		// 	}
+		// 	audioChunksRef.current.push(ev.data);
+		// }
+	};
+
+	async function onStop() {
+		return
+		// stream.getTracks().forEach((t) => t.stop());
+
+		const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+		const url = URL.createObjectURL(audioBlob);
+		if (lastAudioUrl) {
+			URL.revokeObjectURL(lastAudioUrl);
+		}
+		setLastAudioUrl(url);
+
+		if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+			try {
+				wsRef.current.send(audioBlob);
+				setMessages((prev) => [...prev, `sent: audio (${audioBlob.size} bytes)`]);
+			} catch (err) {
+				setMessages((prev) => [...prev, `sent: audio failed (${String(err)})`]);
 			}
-		};
-
-		async function onStop(){
-				return
-				// stream.getTracks().forEach((t) => t.stop());
-
-				const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-				const url = URL.createObjectURL(audioBlob);
-				if (lastAudioUrl) {
-					URL.revokeObjectURL(lastAudioUrl);
-				}
-				setLastAudioUrl(url);
-
-				if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-					try {
-						wsRef.current.send(audioBlob);
-						setMessages((prev) => [...prev, `sent: audio (${audioBlob.size} bytes)`]);
-					} catch (err) {
-						setMessages((prev) => [...prev, `sent: audio failed (${String(err)})`]);
-					}
-				} else {
-					setMessages((prev) => [...prev, "sent: (failed, socket not open)"]);
-				}
-				setIsRecording(false);
-			};
+		} else {
+			setMessages((prev) => [...prev, "sent: (failed, socket not open)"]);
+		}
+		setIsRecording(false);
+	};
 
 	const send = (): void => {
 		if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -104,30 +193,55 @@ export default function Home(): JSX.Element {
 		}
 	};
 
-	const startRecording = async (): Promise<void> => {
-		if (isRecording) return;
-		try {
-			const newStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-			if(!stream){
-				// alert('stream set first time')
-				setStream(newStream)
-			}
-			audioChunksRef.current = [];
-			const options: MediaRecorderOptions = {}; // leave default
-			const mr = new MediaRecorder(newStream, options);
-			mediaRecorderRef.current = mr;
+	let audioContext: AudioContext | null = null;
+	let processor: ScriptProcessorNode | null = null;
+	let sourceNode: MediaStreamAudioSourceNode | null = null;
 
-			mr.ondataavailable = onDataAvailaible
+	const startRecording = async () => {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      sampleRate: 16000,
+      channelCount: 1,
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: false,
+    },
+  });
 
-			mr.onstop = onStop
+  audioContext = new AudioContext({
+    sampleRate: 16000,
+    latencyHint: 'interactive',
+  });
 
-			mr.start(5000);
-			setIsRecording(true);
-			setMessages((prev) => [...prev, "recording: started"]);
-		} catch (err) {
-			setMessages((prev) => [...prev, `recording: failed (${String(err)})`]);
+  sourceNode = audioContext.createMediaStreamSource(stream);
+
+  processor = audioContext.createScriptProcessor(1024, 1, 1); // ← 1024 = ~64ms chunks
+
+  
+	processor.onaudioprocess = (e) => {
+		if (!connection) return;
+
+		const float32Data = e.inputBuffer.getChannelData(0);
+		const int16Data = new Int16Array(float32Data.length);
+
+		for (let i = 0; i < float32Data.length; i++) {
+			const s = Math.max(-1, Math.min(1, float32Data[i]));
+			int16Data[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
 		}
+
+		const base64 = btoa(String.fromCharCode(...new Uint8Array(int16Data.buffer)));
+
+		// THIS IS THE ONLY LINE THAT WORKS WITH @elevenlabs/client
+		connection.send({ audioBase64: base64 });
 	};
+
+  sourceNode.connect(processor);
+  processor.connect(audioContext.destination);
+
+  console.log("REAL PCM streaming started with small chunks");
+};
+
+	
 
 	const stopRecording = (): void => {
 		if (!isRecording || !mediaRecorderRef.current) return;
@@ -209,11 +323,8 @@ export default function Home(): JSX.Element {
 			<div style={{ marginTop: 16 }}>
 				<h3>Messages</h3>
 				<div style={{ maxHeight: 240, overflow: "auto", border: "1px solid #ddd", padding: 8 }}>
-					{messages.length === 0 ? <div style={{ color: "#666" }}>No messages</div> : null}
-					{messages.map((m, i) => (
-						<div key={i} style={{ marginBottom: 6, fontFamily: "monospace" }}>
-							{m}
-						</div>
+					{messages.map((msg, idx) => (
+						<div key={idx}>{msg}</div>
 					))}
 				</div>
 			</div>
